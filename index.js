@@ -1,98 +1,89 @@
 const express = require('express');
-const axios = require('axios');
-const multer = require('multer');
 const cors = require('cors');
+const { Pool } = require('pg');
+const multer = require('multer');
+require('dotenv').config();
 
 const app = express();
 const port = 3001;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors({
-  origin: 'http://localhost:3000', // Update with the URL where your React app is running
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  credentials: true,
-  optionsSuccessStatus: 204,
-  exposedHeaders: ['Authorization'],
-}));
+app.use(cors());
 
-let authToken;
-let conversationId;
+// PostgreSQL database connection configuration
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
+  port: process.env.DB_PORT,
+});
 
-// Set up multer for file upload
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+// Check database connection
+pool.connect((err, client, release) => {
+  if (err) {
+    return console.error('Error acquiring client', err.stack);
+  }
+  console.log('Connected to database');
+  client.release();
+});
 
-// Authentication route for Symbl.ai
-app.get('/authenticate', async (req, res) => {
+// Set up multer for handling file uploads
+const upload = multer({
+  dest: 'uploads/'
+});
+
+// Endpoint for storing login details
+app.post('/login', async (req, res) => {
+  const { username, email } = req.body;
   try {
-    const response = await axios.post('https://api.symbl.ai/oauth2/token:generate', {
-      type: 'application',
-      appId: '6331503556564766444137434f3964694e6842414c57417942463433784b6450', // Replace with your Symbl.ai app ID
-      appSecret: '73527441635445677143524c636c76684f3766586a684f6247347a384d545966627951616d7a5579754e6957634f78323638583446705835475a4b5456727133', // Replace with your Symbl.ai app secret
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    authToken = response.data.accessToken;
-    res.json(response.data);
+    const client = await pool.connect();
+    const result = await client.query('INSERT INTO user_data (username, email) VALUES ($1, $2)', [username, email]);
+    client.release();
+    res.status(200).json({ success: true, message: 'Login successful' });
   } catch (error) {
-    console.error('Error authenticating:', error.message);
-    res.status(error.response ? error.response.status : 500).send(error.message);
+    console.error('Error logging in:', error);
+    res.status(500).json({ success: false, message: 'Failed to log in' });
   }
 });
 
-// Media route to process audio using Symbl.ai
-app.post('/process-media', upload.single('file'), async (req, res) => {
-  // Specify parameters for Symbl.ai processing
-  const params = {
-    name: 'Name',
-    languageCode: 'en-US',
-    enableAllTrackers: true,
-  };
-
-  const mediaOption = {
-    url: 'https://api.symbl.ai/v1/process/audio',
-    headers: {
-      Authorization: `Bearer ${authToken}`,
-      'Content-Type': `audio/${req.file.mimetype.split('/')[1]}`,
-    },
-    qs: params,
-    json: true,
-  };
-
+// Endpoint for submitting typing test score
+app.post('/submit-typing-test', async (req, res) => {
+  const { username, typingTestScore } = req.body; // Assuming userId is available in the request body
   try {
-    const response = await axios.post(mediaOption.url, req.file.buffer, {
-      headers: mediaOption.headers,
-      params: mediaOption.qs,
-    });
-
-    conversationId = response.data.conversationId;
-    res.json(response.data);
+    const client = await pool.connect();
+    // Assuming user_data table has a foreign key reference to a users table, and userId is the foreign key
+    const result = await client.query('UPDATE user_data SET typing_test_score = $1 WHERE username = $2', [typingTestScore, username]);
+    client.release();
+    res.status(200).json({ success: true, message: 'Typing test score submitted successfully' });
   } catch (error) {
-    console.error('Error processing media:', error.message);
-    res.status(error.response ? error.response.status : 500).send(error.message);
+    console.error('Error executing query', error);
+    res.status(500).json({ success: false, message: 'Failed to submit typing test score' });
   }
 });
 
-// Get results of intelligence generation from Symbl.ai
-app.get('/get-intelligence', async (req, res) => {
-  const intelligenceOption = {
-    url: `https://api.symbl.ai/v1/conversations/${conversationId}/trackers`,
-    headers: { Authorization: `Bearer ${authToken}` },
-    json: true,
-  };
-
+// Endpoint for submitting voice test
+// Endpoint for submitting voice test
+app.post('/submit-voice-test', upload.single('file'), async (req, res) => {
   try {
-    const response = await axios(intelligenceOption);
-    res.json(response.data);
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const { username } = req.body;
+    const filePath = req.file.path;
+
+    const client = await pool.connect();
+    const result = await client.query('UPDATE user_data SET audio_file = $1 WHERE username = $2', [filePath, username]);
+    client.release();
+    res.status(200).json({ success: true, message: 'Voice test submitted successfully' });
   } catch (error) {
-    console.error('Error fetching intelligence:', error.message);
-    res.status(error.response ? error.response.status : 500).send(error.message);
+    console.error('Error executing query', error);
+    res.status(500).json({ success: false, message: 'Failed to submit voice test' });
   }
 });
+
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
