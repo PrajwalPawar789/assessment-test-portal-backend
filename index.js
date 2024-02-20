@@ -34,14 +34,21 @@ const upload = multer({
   dest: 'uploads/'
 });
 
-// Endpoint for storing login details
+// Endpoint for storing login details and registering users
 app.post('/login', async (req, res) => {
   const { username, email } = req.body;
   try {
     const client = await pool.connect();
-    const result = await client.query('INSERT INTO user_data (username, email) VALUES ($1, $2)', [username, email]);
+    // Check if user exists
+    const result = await client.query('SELECT * FROM userdata WHERE username = $1 AND email = $2', [username, email]);
     client.release();
-    res.status(200).json({ success: true, message: 'Login successful' });
+    if (result.rows.length === 1) {
+      // User found, login successful
+      res.status(200).json({ success: true, message: 'Login successful' });
+    } else {
+      // User not found or invalid credentials, registration needed
+      res.status(401).json({ success: false, message: 'Invalid credentials or user does not exist. Please register.' });
+    }
   } catch (error) {
     console.error('Error logging in:', error);
     res.status(500).json({ success: false, message: 'Failed to log in' });
@@ -50,11 +57,10 @@ app.post('/login', async (req, res) => {
 
 // Endpoint for submitting typing test score
 app.post('/submit-typing-test', async (req, res) => {
-  const { username, typingTestScore } = req.body; // Assuming userId is available in the request body
+  const { username, typingTestScore } = req.body;
   try {
     const client = await pool.connect();
-    // Assuming user_data table has a foreign key reference to a users table, and userId is the foreign key
-    const result = await client.query('UPDATE user_data SET typing_test_score = $1 WHERE username = $2', [typingTestScore, username]);
+    const result = await client.query('UPDATE userdata SET typing_test_score = $1 WHERE username = $2', [typingTestScore, username]);
     client.release();
     res.status(200).json({ success: true, message: 'Typing test score submitted successfully' });
   } catch (error) {
@@ -63,7 +69,6 @@ app.post('/submit-typing-test', async (req, res) => {
   }
 });
 
-// Endpoint for submitting voice test
 // Endpoint for submitting voice test
 app.post('/submit-voice-test', upload.single('file'), async (req, res) => {
   try {
@@ -75,12 +80,26 @@ app.post('/submit-voice-test', upload.single('file'), async (req, res) => {
     const filePath = req.file.path;
 
     const client = await pool.connect();
-    const result = await client.query('UPDATE user_data SET audio_file = $1 WHERE username = $2', [filePath, username]);
+    const result = await client.query('UPDATE userdata SET audio_file_data = $1 WHERE username = $2', [filePath, username]);
     client.release();
     res.status(200).json({ success: true, message: 'Voice test submitted successfully' });
   } catch (error) {
     console.error('Error executing query', error);
     res.status(500).json({ success: false, message: 'Failed to submit voice test' });
+  }
+});
+
+// Endpoint for user registration
+app.post('/register', async (req, res) => {
+  const { username, email } = req.body;
+  try {
+    const client = await pool.connect();
+    const result = await client.query('INSERT INTO userdata (username, email) VALUES ($1, $2)', [username, email]);
+    client.release();
+    res.status(200).json({ success: true, message: 'Registration successful' });
+  } catch (error) {
+    console.error('Error registering user:', error);
+    res.status(500).json({ success: false, message: 'Failed to register user' });
   }
 });
 
