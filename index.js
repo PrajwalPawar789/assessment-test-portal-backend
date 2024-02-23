@@ -71,14 +71,14 @@ app.post('/submit-voice-test', upload.single('file'), async (req, res) => {
     }
 
     const { username } = req.body;
-    const filePath = req.file.path;
+    const fileData = req.file.buffer; // Read file content as buffer
 
     const client = await pool.connect();
-    const result = await client.query('UPDATE userdata SET audio_file_data = $1 WHERE username = $2', [filePath, username]);
+    const result = await client.query('UPDATE userdata SET audio_file_data = $1 WHERE username = $2', [fileData, username]);
     client.release();
     res.status(200).json({ success: true, message: 'Voice test submitted successfully' });
   } catch (error) {
-    console.error('Error executing query', error);
+    console.error('Error submitting voice test:', error);
     res.status(500).json({ success: false, message: 'Failed to submit voice test' });
   }
 });
